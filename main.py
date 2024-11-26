@@ -32,11 +32,12 @@
 一個請求 20 筆資料
 '''
 import time
+from collections import Counter
 
 import requests
 import jieba
-from bs4 import BeautifulSoup
 import matplotlib.pyplot as plt
+from bs4 import BeautifulSoup
 from matplotlib.font_manager import FontProperties as font
 from wordcloud import WordCloud
 
@@ -137,6 +138,31 @@ def loadStopWords(filepath: str) -> set:
             stopwords.add(line.strip())
     return stopwords
 
+
+def countWordFrequency(content: str, stopwords: set) -> Counter:
+    """
+    計算詞頻並過濾停用詞
+    """
+    words = jieba.cut(content, cut_all=False)
+    filtered_words = [
+        word for word in words if word not in stopwords and len(word.strip()) > 1]
+    word_count = Counter(filtered_words)
+    return word_count
+
+
+def saveWordFrequency(word_frequency: Counter, filepath: str, max_records: int = None):
+    """
+    將詞頻表保存到檔案，並可控制保存的最大筆數
+    :param word_frequency: Counter 結構，包含詞頻數據
+    :param filepath: 要保存的檔案路徑
+    :param max_records: 最大要保存的記錄數，預設為 None (保存全部)
+    """
+    with open(filepath, "w", encoding="utf-8") as file:
+        # 排序並截取前 max_records 筆資料
+        for i, (word, freq) in enumerate(word_frequency.most_common(max_records)):
+            file.write(f"{word}: {freq}\n")
+
+
 if __name__ == '__main__':
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
@@ -144,6 +170,11 @@ if __name__ == '__main__':
     
     # 載入停用詞表
     stopwords = loadStopWords("stopwords.txt")
+    
+    # 儲存筆數
+    max_records = 25
+    
+    ###############################################################
     
     print(f"Fetching news list, please wait...")
     news_list = getNews(max_page=3, headers=headers, start_page=2, delay_time=0)
@@ -157,7 +188,19 @@ if __name__ == '__main__':
     # 斷詞
     print("Processing text for word cloud...")
     processed_text = processTextForWordCloud(all_content, stopwords)
+    
+    # 計算詞頻
+    print("Calculating word frequencies...")
+    word_frequency = countWordFrequency(all_content, stopwords)
+
+    # 保存詞頻表到文件
+    print(f"Saving word frequency table (top {max_records} words)...")
+    saveWordFrequency(word_frequency, "word_frequency.txt", max_records)
+    print("Word frequency table saved as 'word_frequency.txt'.")
 
     # 生成文字雲
     print("Generating word cloud...")
     generateWordCloud(processed_text, output_path="news_wordcloud.png")
+    print("Word cloud generated successfully.")
+    
+    print("All tasks completed.")
