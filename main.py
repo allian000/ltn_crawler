@@ -96,15 +96,17 @@ def getNewsContent(news: News, headers: dict) -> str:
             f"Request failed with status code {response.status_code}")
 
 
-def processTextForWordCloud(content: str) -> str:
+def processTextForWordCloud(content: str, stopwords: set) -> str:
     # 使用 jieba 進行斷詞
     words = jieba.cut(content, cut_all=False)
-    return " ".join(words)
+    filtered_words = [
+        word for word in words if word not in stopwords and len(word.strip()) > 1]
+    return " ".join(filtered_words)
 
 
 def generateWordCloud(words: str, output_path: str = "wordcloud.png"):
     font1 = font(
-        fname="./NotoSansTC-Regular.otf")
+        fname="./NotoSansTC-Regular.ttf")
     
     # 生成文字雲
     wordcloud = WordCloud(
@@ -123,14 +125,28 @@ def generateWordCloud(words: str, output_path: str = "wordcloud.png"):
 
     # 儲存文字雲圖
     wordcloud.to_file(output_path)
+    
+
+def loadStopWords(filepath: str) -> set:
+    """
+    載入停用詞表
+    """
+    stopwords = set()
+    with open(filepath, "r", encoding="utf-8") as file:
+        for line in file:
+            stopwords.add(line.strip())
+    return stopwords
 
 if __name__ == '__main__':
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
     }
     
+    # 載入停用詞表
+    stopwords = loadStopWords("stopwords.txt")
+    
     print(f"Fetching news list, please wait...")
-    news_list = getNews(max_page=5, headers=headers, start_page=2, delay_time=0)
+    news_list = getNews(max_page=3, headers=headers, start_page=2, delay_time=0)
     
     all_content = ""
     for news in news_list:
@@ -140,7 +156,7 @@ if __name__ == '__main__':
 
     # 斷詞
     print("Processing text for word cloud...")
-    processed_text = processTextForWordCloud(all_content)
+    processed_text = processTextForWordCloud(all_content, stopwords)
 
     # 生成文字雲
     print("Generating word cloud...")
