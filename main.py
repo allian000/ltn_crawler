@@ -31,9 +31,10 @@
 
 一個請求 20 筆資料
 '''
+
+
 import time
 from collections import Counter
-
 import requests
 import jieba
 import matplotlib.pyplot as plt
@@ -42,10 +43,9 @@ from matplotlib.font_manager import FontProperties as font
 from wordcloud import WordCloud
 
 
-class News():
-    '''
-    取得新聞資料格式
-    '''
+class News:
+    """儲存新聞資訊"""
+
     def __init__(self, no: str, title: str, url: str, time: str):
         self.no = no
         self.title = title
@@ -53,154 +53,162 @@ class News():
         self.time = time
 
 
-def getNews(max_page: int, headers: dict, start_page: int=1, delay_time:float=1) -> list:
-    news_list = []
-    for i in range(start_page, max_page+1):
-        url = f"https://news.ltn.com.tw/ajax/breakingnews/world/{i}"
+class NewsCrawler:
+    """負責抓取新聞資料"""
 
+    def __init__(self, headers: dict, delay_time: float = 1):
+        self.headers = headers
+        self.delay_time = delay_time
+
+    def fetch_news_list(self, max_page: int, start_page: int = 1) -> list:
+        """抓取新聞列表"""
+        news_list = []
+        for i in range(start_page, max_page + 1):
+            url = f"https://news.ltn.com.tw/ajax/breakingnews/world/{i}"
+            try:
+                response = requests.get(url, headers=self.headers)
+                if response.status_code == 200:
+                    news_data = response.json().get("data", [])
+                    for news in news_data:
+                        news_list.append(
+                            News(
+                                news["no"], news["title"], news["url"], news["time"]
+                            )
+                        )
+                time.sleep(self.delay_time)
+            except Exception as e:
+                print(f"Failed to fetch news list from page {i}: {e}")
+        return news_list
+
+    def fetch_news_content(self, news: News) -> str:
+        """抓取單篇新聞內容"""
         try:
-            response = requests.get(url, headers=headers)
+            response = requests.get(news.url, headers=self.headers)
             if response.status_code == 200:
-                raw_data = response.json()
-                news_data = raw_data['data']
-                news_no_list = []
-                for news in news_data:
-                    news_list.append(News(news_data[news]['no'], news_data[news]['title'], news_data[news]['url'], news_data[news]['time']))
-            
+                soup = BeautifulSoup(response.text, "html.parser")
+                content_div = soup.find("div", class_="text boxTitle boxText")
+                if content_div:
+                    content = []
+                    for paragraph in content_div.find_all("p"):
+                        text = paragraph.get_text(strip=True)
+                        if (
+                            not text
+                            or "點我下載APP" in text
+                            or "按我看活動辦法" in text
+                            or "請繼續往下閱讀..." in text
+                        ):
+                            continue
+                        content.append(text)
+                    return " ".join(content)
         except Exception as e:
-            raise e
-
-        time.sleep(delay_time)
-    return news_list
+            print(f"Failed to fetch content for {news.title}: {e}")
+        return ""
 
 
-def getNewsContent(news: News, headers: dict) -> str:
-    response = requests.get(news.url, headers=headers)
-    if response.status_code == 200:
-        soup = BeautifulSoup(response.text, 'html.parser')
-        content_div = soup.find('div', class_='text boxTitle boxText')
+class TextProcessor:
+    """負責文本處理"""
 
-        if content_div:
-            content = []
-            for paragraph in content_div.find_all('p'):
-                text = paragraph.get_text(strip=True)
-                # 過濾無用的段落
-                if not text or "點我下載APP" in text or "按我看活動辦法" in text or "請繼續往下閱讀..." in text:
-                    continue
-                content.append(text)
-            return " ".join(content)
-        else:
-            print(f"Content not found for: {news.url}")
-            return ""
-    else:
-        raise Exception(
-            f"Request failed with status code {response.status_code}")
+    def __init__(self, stopwords: set):
+        self.stopwords = stopwords
 
+    def process_text(self, content: str) -> str:
+        """文本斷詞並過濾停用詞"""
+        words = jieba.cut(content, cut_all=False)
+        filtered_words = [
+            word for word in words if word not in self.stopwords and len(word.strip()) > 1
+        ]
+        return " ".join(filtered_words)
 
-def processTextForWordCloud(content: str, stopwords: set) -> str:
-    # 使用 jieba 進行斷詞
-    words = jieba.cut(content, cut_all=False)
-    filtered_words = [
-        word for word in words if word not in stopwords and len(word.strip()) > 1]
-    return " ".join(filtered_words)
+    def calculate_word_frequency(self, content: str) -> Counter:
+        """計算詞頻"""
+        words = jieba.cut(content, cut_all=False)
+        filtered_words = [
+            word for word in words if word not in self.stopwords and len(word.strip()) > 1
+        ]
+        return Counter(filtered_words)
 
-
-def generateWordCloud(words: str, output_path: str = "wordcloud.png"):
-    font1 = font(
-        fname="./NotoSansTC-Regular.ttf")
-    
-    # 生成文字雲
-    wordcloud = WordCloud(
-        font_path="NotoSansTC-Regular.ttf",
-        width=800,
-        height=600,
-        background_color="white",
-        max_words=200,
-    ).generate(words)
-
-    # 顯示文字雲
-    plt.figure(figsize=(10, 8))
-    plt.imshow(wordcloud, interpolation="bilinear")
-    plt.axis("off")
-    plt.show()
-
-    # 儲存文字雲圖
-    wordcloud.to_file(output_path)
-    
-
-def loadStopWords(filepath: str) -> set:
-    """
-    載入停用詞表
-    """
-    stopwords = set()
-    with open(filepath, "r", encoding="utf-8") as file:
-        for line in file:
-            stopwords.add(line.strip())
-    return stopwords
+    @staticmethod
+    def load_stopwords(filepath: str) -> set:
+        """載入停用詞表"""
+        stopwords = set()
+        with open(filepath, "r", encoding="utf-8") as file:
+            for line in file:
+                stopwords.add(line.strip())
+        return stopwords
 
 
-def countWordFrequency(content: str, stopwords: set) -> Counter:
-    """
-    計算詞頻並過濾停用詞
-    """
-    words = jieba.cut(content, cut_all=False)
-    filtered_words = [
-        word for word in words if word not in stopwords and len(word.strip()) > 1]
-    word_count = Counter(filtered_words)
-    return word_count
+class WordCloudGenerator:
+    """負責生成文字雲"""
+
+    @staticmethod
+    def generate_word_cloud(text: str, output_path: str = "wordcloud.png"):
+        """生成並保存文字雲"""
+        wordcloud = WordCloud(
+            font_path="NotoSansTC-Regular.ttf",
+            width=800,
+            height=600,
+            background_color="white",
+            max_words=200,
+        ).generate(text)
+
+        # 顯示文字雲
+        plt.figure(figsize=(10, 8))
+        plt.imshow(wordcloud, interpolation="bilinear")
+        plt.axis("off")
+        plt.show()
+
+        # 儲存文字雲
+        wordcloud.to_file(output_path)
+        print(f"Word cloud saved to {output_path}")
 
 
-def saveWordFrequency(word_frequency: Counter, filepath: str, max_records: int = None):
-    """
-    將詞頻表保存到檔案，並可控制保存的最大筆數
-    :param word_frequency: Counter 結構，包含詞頻數據
-    :param filepath: 要保存的檔案路徑
-    :param max_records: 最大要保存的記錄數，預設為 None (保存全部)
-    """
+def save_word_frequency(word_frequency: Counter, filepath: str, max_records: int = None):
+    """保存詞頻表到檔案"""
     with open(filepath, "w", encoding="utf-8") as file:
-        # 排序並截取前 max_records 筆資料
-        for i, (word, freq) in enumerate(word_frequency.most_common(max_records)):
+        for word, freq in word_frequency.most_common(max_records):
             file.write(f"{word}: {freq}\n")
+    print(f"Word frequency table saved to {filepath}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
+    # 初始化設定
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
     }
-    
-    # 載入停用詞表
-    stopwords = loadStopWords("stopwords.txt")
-    
-    # 儲存筆數
+    stopwords_file = "stopwords.txt"
     max_records = 25
-    
-    ###############################################################
-    
-    print(f"Fetching news list, please wait...")
-    news_list = getNews(max_page=3, headers=headers, start_page=2, delay_time=0)
-    
+
+    # 載入停用詞表
+    stopwords = TextProcessor.load_stopwords(stopwords_file)
+
+    # 初始化各類別
+    crawler = NewsCrawler(headers=headers, delay_time=1)
+    processor = TextProcessor(stopwords=stopwords)
+    cloud_generator = WordCloudGenerator()
+
+    # 爬取新聞
+    print("Fetching news list...")
+    news_list = crawler.fetch_news_list(max_page=3, start_page=1)
+
+    # 爬取內容並處理
+    print("Fetching and processing news content...")
     all_content = ""
     for news in news_list:
-        print(f"Fetching content for: {news.title}, published at {news.time}")
-        news_content = getNewsContent(news, headers=headers)
-        all_content += news_content + " "
+        print(f"Fetching content for: {news.title} ({news.time})")
+        content = crawler.fetch_news_content(news)
+        all_content += content + " "
 
-    # 斷詞
+    # 斷詞與詞頻計算
     print("Processing text for word cloud...")
-    processed_text = processTextForWordCloud(all_content, stopwords)
-    
-    # 計算詞頻
-    print("Calculating word frequencies...")
-    word_frequency = countWordFrequency(all_content, stopwords)
+    processed_text = processor.process_text(all_content)
+    word_frequency = processor.calculate_word_frequency(all_content)
 
-    # 保存詞頻表到文件
-    print(f"Saving word frequency table (top {max_records} words)...")
-    saveWordFrequency(word_frequency, "word_frequency.txt", max_records)
-    print("Word frequency table saved as 'word_frequency.txt'.")
+    # 保存詞頻表
+    save_word_frequency(word_frequency, "word_frequency.txt", max_records)
 
     # 生成文字雲
     print("Generating word cloud...")
-    generateWordCloud(processed_text, output_path="news_wordcloud.png")
-    print("Word cloud generated successfully.")
-    
+    cloud_generator.generate_word_cloud(
+        processed_text, output_path="news_wordcloud.png")
+
     print("All tasks completed.")
